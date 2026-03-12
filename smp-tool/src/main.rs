@@ -113,6 +113,12 @@ enum ApplicationCmd {
         #[arg(long)]
         upgrade: bool,
     },
+    /// Confirm/activate an image slot (makes the image permanent after a test boot)
+    Confirm {
+        /// Image slot to confirm (0 = primary/active, 1 = secondary).
+        #[arg(short, long)]
+        slot: u8,
+    },
 }
 
 pub enum UsedTransport {
@@ -265,6 +271,40 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("Image verified");
                 } else {
                     eprintln!("Image verification failed!");
+                }
+            }
+        }
+        Commands::App(ApplicationCmd::Confirm { slot }) => {
+            let tlv_hash: Vec<u8> = {
+                let state_ret: SmpFrame<GetImageStateResult> = transport
+                    .transceive_cbor(&application_management::get_state(41))
+                    .await?;
+                match state_ret.data {
+                    GetImageStateResult::Ok(ref payload) => payload
+                        .images
+                        .iter()
+                        .find(|img| img.slot == slot as i32)
+                        .map(|img| img.hash.clone())
+                        .ok_or_else(|| format!("slot {} not found in image state", slot))?,
+                    GetImageStateResult::Err(err) => {
+                        return Err(format!("get_state error rc: {}", err.rc))?;
+                    }
+                }
+            };
+
+            let set_state = application_management::set_state(tlv_hash, true, 42);
+            let ret: SmpFrame<GetImageStateResult> = transport.transceive_cbor(&set_state).await?;
+
+            match ret.data {
+                GetImageStateResult::Ok(payload) => {
+                    println!("Image confirmed: {:?}", payload);
+                }
+                GetImageStateResult::Err(err) => {
+                    eprintln!(
+                        "confirm error rc: {} ({:?})",
+                        err.rc,
+                        err.rsn.unwrap_or("".into())
+                    );
                 }
             }
         }
