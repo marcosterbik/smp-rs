@@ -9,7 +9,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand, ValueEnum};
 use mcumgr_smp::{
     application_management::{self, GetImageStateResult, WriteImageChunkResult},
-    os_management::{self, EchoResult},
+    os_management::{self, EchoResult, ResetResult},
     shell_management::{self, ShellResult},
     smp::SmpFrame,
     transport::{
@@ -84,6 +84,11 @@ enum Commands {
 enum OsCmd {
     /// Send an SMP Echo request
     Echo { msg: String },
+    /// Send a SMP Reset request
+    Reset {
+        #[arg(short, long, default_value_t = false)]
+        force: bool,
+    },
 }
 #[derive(Subcommand, Debug)]
 enum ShellCmd {
@@ -192,6 +197,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("{}", r);
                 }
                 EchoResult::Err { rc } => {
+                    eprintln!("rc: {}", rc);
+                }
+            }
+        }
+        Commands::Os(OsCmd::Reset { force }) => {
+            let ret: SmpFrame<ResetResult> = transport
+                .transceive_cbor(&os_management::reset(42, force))
+                .await?;
+            debug!("{:?}", ret);
+
+            match ret.data {
+                ResetResult::Ok {} => {
+                    println!("Reset sent sucessfully");
+                }
+                ResetResult::Err { rc } => {
                     eprintln!("rc: {}", rc);
                 }
             }
